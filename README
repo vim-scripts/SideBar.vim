@@ -1,0 +1,34 @@
+This is a mirror of http://www.vim.org/scripts/script.php?script_id=720
+
+There are many fine plugins that use persistent windows to display useful
+information (e.g. TagList plugin) or to provide bookmark-like portal to
+other files and buffers (e.g. Project or Buffer explorers etc.). There is
+one major drawback to using them: you have to sacrifice precious screen real
+estate. One way to compensate is to put those auxillary windows in
+'side-pocket', and to open and close it when needed. So here comes SideBar.
+
+As a stand-alone plugin it's pretty useless. It's really a framework that
+allows easy creation of SideBar-contained plugins. As an example I've
+included my very simplistic rewrite of excellent Project plugin by Aric
+Blumer. Note that it doesn't even try to manage its window. Just 'register'
+it in SideBar with following command (to learn more of ProjectJr, read its
+comments):
+:SideBarAddCmd ProjectJr ~/main.prj
+
+Now you have mini-project in your side-pocket. Use :SideBarEnter or
+:SideBarEnterToggle to quickly enter/leave it. If you close its window
+(without destroying its buffer), or make it 'only', next invocation of one
+of those commands will bring SideBar back. Of course, it's best to map these
+commands to some handy keys, e.g. <Tab>.
+
+You can have as many projects/other buffers managed by SideBar as you wish.
+Register these buffers with :SideBarAddCmd <any ex command> and switch
+between them with :SideBarCycle
+
+To hack deep inside SideBar, another command is provided:
+:SideBarExec <any ex command> will execute <any ex command> in SideBar
+context without buffer registration. Note that you can use 's:' prefix to
+call plugin-local functions and modify its variables, so proceed with
+caution. To call functions local to your script, use <SID> prefix as
+usual.
+
