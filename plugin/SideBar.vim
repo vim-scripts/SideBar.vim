@@ -1,7 +1,7 @@
 " vim: ts=2 sw=2 et fdm=marker cms=\ \"%s
 " Plugin: SideBar --- auto-shrinking container of vertically aligned material
-" Version: 0.1
-" $Id: SideBar.vim,v 1.55 2003/07/23 19:12:14 andrew Exp $
+" Version: 0.2
+" $Id: SideBar.vim,v 1.87 2003/08/12 17:47:36 andrew Exp $
 "
 " Author: Andrew Rodionoff <arnost AT mail DOT ru>
 "
@@ -39,8 +39,46 @@
 " caution. To call functions local to your script, use <SID> prefix as
 " usual.
 "
+" New in v0.2:
+"
+" - Some stability enhancements
+"
+" - New configuration variables: g:SideBar_max_width, g:SideBar_min_width.
+"   See source comments for explanation.
+"
+" - New :SideBarSwallow command takes current buffer into SideBar and removes
+"   it from main buffer list.
+"
+"   e.g. you can put these lines in .vimrc:
+"
+"augroup SideBarInit
+"  au!
+"  au VimEnter * call <SID>SetupSbar()
+"augroup END
+"
+"fun! s:SetupSbar()
+"  Calendar
+"  let l:newwidth=winwidth('.') 
+"  SideBarSwallow
+"  close                                " get rid of split windows
+"  close
+"  let g:SideBar_max_width = l:newwidth " ensure that Calendar is fully
+"                                       " visible in maximized state
+"  SideBarAddCmd ProjectJr ~/vim/global.prj
+"endfun
+"
+" Configuration variables
+"
+" Set g:SideBar_max_width to desired width in 'maximized' mode
+  if !exists('g:SideBar_max_width')
+    let g:SideBar_max_width = &tw / 4
+  endif
+"
+" Set g:SideBar_min_width to desired width in 'minimized' mode
+  if !exists('g:SideBar_min_width')
+    let g:SideBar_min_width = &columns - &tw - 2
+  endif
 
-let s:managed = ''
 let s:winnr = -1
 let s:safe = 0
 
@@ -49,11 +87,28 @@ augroup SideBar "{{{
   au!
   au WinEnter * call <SID>OnEnter()
   au BufAdd * call <SID>Bounce()
+"  au BufLeave * call <SID>ReSplitIfNeeded()
 augroup END "}}}
 
 " Internals
+" TODO: There must be a way to catch situations when sidebar window becomes
+" 'only'. 
+"
+"fun! s:ReSplitIfNeeded()
+"  if exists('this_is_SideBar_window')
+"    return
+"  endif
+"  let l:w = 0
+"  while winwidth(l:w) != -1
+"    let l:w = l:w + 1
+"  endwhile
+"  if l:w <= 2 
+"    vnew
+"  endif
+"endfun
+
 fun! s:Bounce() " Do not allow casual buffer creation in SideBar {{{
-  if exists('w:this_is_sidebar_window') && !s:safe 
+  if exists('w:this_is_SideBar_window') && !s:safe 
     wincmd w
   endif
 endfun "}}}
@@ -74,9 +129,9 @@ endfun "}}}
 fun! s:FindSelf() " Returns window number of SideBar or -1 {{{
   let l:w = 1
   while winwidth(l:w) != -1
-    if getwinvar(l:w, 'this_is_sidebar_window') != ''
+    if getwinvar(l:w, 'this_is_SideBar_window') != ''
       if winwidth(2) == -1 " we are 'only'
-        unlet w:this_is_sidebar_window
+        unlet w:this_is_SideBar_window
         return -1
       else
         return l:w
@@ -99,12 +154,12 @@ endfun "}}}
 
 fun! s:Create() " Initialize SideBar window{{{
   vsplit
-  let w:this_is_sidebar_window=1
+  let w:this_is_SideBar_window=1
   call s:OnEnter()
 endfun "}}}
 
 fun! s:EnterToggle() " see above {{{
-  if exists('w:this_is_sidebar_window') && winwidth(2) != -1
+  if exists('w:this_is_SideBar_window') && winwidth(2) != -1
     silent wincmd p
   else
     call s:Enter()
@@ -112,20 +167,10 @@ fun! s:EnterToggle() " see above {{{
 endfun "}}}
 
 fun! s:OnEnter() " Ensure SideBar placement and size {{{
-  if !exists('g:sidebar_max_width')
-    let l:maxw = &tw / 4
+  if exists('w:this_is_SideBar_window')
+    call s:ExecInside('wincmd H | ' . g:SideBar_max_width . 'wincmd |')
   else
-    let l:maxw = g:sidebar_max_width
-  endif
-  if !exists('g:sidebar_min_width')
-    let l:minw = &columns - &tw - 2
-  else
-    let l:minw = g:sidebar_min_width
-  endif
-  if exists('w:this_is_sidebar_window')
-    call s:ExecInside('wincmd H | ' . l:maxw . 'wincmd |')
-  else
-    call s:ExecInside('wincmd H | ' . l:minw . 'wincmd |')
+    call s:ExecInside('wincmd H | ' . g:SideBar_min_width . 'wincmd |')
   endif
 endfun "}}}
 
@@ -140,7 +185,7 @@ fun! s:Cycle() " Auxillary cycling function {{{
     endif
     if l:i == l:curbuf
       return
-    elseif bufexists(l:i) && s:IsManaged(fnamemodify(bufname(l:i), ':p'))
+    elseif bufexists(l:i) && s:IsManaged(l:i)
       exec 'buffer ' . l:i
       return
     endif
@@ -148,13 +193,14 @@ fun! s:Cycle() " Auxillary cycling function {{{
 endfun "}}}
 
 fun! s:IsManaged(buf) " Check if buffer is managed by SideBar {{{
-  return (stridx(s:managed,  "\n " . a:buf .  "\n ") != -1)
+  return (getbufvar(a:buf, 'this_is_SideBar_managed_buffer') != '')
 endfun "}}}
 
 fun! s:ManageBuffer(buf) " Introduce 'buf' to SideBar {{{
-  if !s:IsManaged(a:buf)
-    let s:managed = s:managed .  "\n " . a:buf .  "\n "
+  if !s:IsManaged(a:buf) && bufexists(a:buf)
+    call setbufvar(a:buf, 'this_is_SideBar_managed_buffer', 1)
   endif
+  call s:ExecInside('buffer ' . a:buf)
 endfun "}}}
 
 fun! s:CycleManaged() " Use command with the same name {{{
@@ -170,14 +216,42 @@ fun! s:Manage(command) " Use command :SideBarAddCmd {{{
   endif
   let s:safe = 1
   call s:ExecInside(a:command)
+  call s:ExecInside('setlocal nobuflisted bufhidden=hide')
   call s:ExecInside('call s:ManageBuffer(expand("%:p"))')
   let s:safe = 0
 endfun "}}}
 
+fun! s:Swallow()
+  setlocal nobuflisted bufhidden=hide
+  if s:FindSelf() == -1
+    call s:Create()
+  endif
+  let s:safe = 1
+  call s:ManageBuffer(bufnr('%'))
+  let s:safe = 0
+  let l:bufn = 1
+  let l:nlisted = 0
+  while l:bufn <= bufnr('$')
+    if buflisted(l:bufn)
+      let l:nlisted = 1
+      break
+    endif
+    let l:bufn = l:bufn + 1
+  endwhile
+  if l:nlisted > 0
+    bnext
+  else
+    enew
+  endif
+endfun
+
+
 " Exported commands
+"
 command! SideBarEnter call <SID>Enter()
 command! SideBarEnterToggle call <SID>EnterToggle()
 command! SideBarCycle call <SID>CycleManaged()
+command! SideBarSwallow call <SID>Swallow()
 command! -nargs=1 -complete=command SideBarExec call <SID>ExecInside(<f-args>)
 command! -nargs=1 -complete=command SideBarAddCmd call <SID>Manage(<f-args>)
 
