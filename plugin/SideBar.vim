@@ -1,7 +1,7 @@
 " vim: ts=2 sw=2 et fdm=marker cms=\ \"%s
 " Plugin: SideBar --- auto-shrinking container of vertically aligned material
-" Version: 0.2
-" $Id: SideBar.vim,v 1.87 2003/08/12 17:47:36 andrew Exp $
+" Version: 0.3
+" $Id: SideBar.vim,v 1.216.1.20 2003/09/22 14:53:19 andrew Exp $
 "
 " Author: Andrew Rodionoff <arnost AT mail DOT ru>
 "
@@ -39,6 +39,20 @@
 " caution. To call functions local to your script, use <SID> prefix as
 " usual.
 "
+" New in v0.3:
+" - New behaviour: SideBar tries harder to keep out of your way on creation
+"   and startup.  When last working window is closed and SideBar becomes
+"   'only', SideBar disappears and next buffer gets focus.
+"
+"   Note: second 'close' command on Calendar swallow is no longer nessessary.
+"   Note: global 'winwidth' option is now updated on sidebar creation, to
+"   prevent unneeded (and annoying) resizing in certain situations.
+"
+" - Last 'cycled to' buffer is remembered and selected when SideBar is
+"   re-created.
+"
+" - Included two new mini-plugins: TagListJr and BufExplorerJr
+"
 " New in v0.2:
 "
 " - Some stability enhancements
@@ -61,9 +75,10 @@
 "  let l:newwidth=winwidth('.') 
 "  SideBarSwallow
 "  close                                " get rid of split windows
-"  close
 "  let g:SideBar_max_width = l:newwidth " ensure that Calendar is fully
 "                                       " visible in maximized state
+"  SideBarAddCmd TagListJr
+"  SideBarAddCmd BufExplorerJr
 "  SideBarAddCmd ProjectJr ~/vim/global.prj
 "endfun
 "
@@ -81,35 +96,32 @@
 
 let s:winnr = -1
 let s:safe = 0
+let s:active_buffer = -1
 
 " Autocommands
 augroup SideBar "{{{
   au!
   au WinEnter * call <SID>OnEnter()
   au BufAdd * call <SID>Bounce()
-"  au BufLeave * call <SID>ReSplitIfNeeded()
+"  au BufDelete * call <SID>Resplit(expand('<afile>'))
 augroup END "}}}
 
 " Internals
-" TODO: There must be a way to catch situations when sidebar window becomes
-" 'only'. 
 "
-"fun! s:ReSplitIfNeeded()
-"  if exists('this_is_SideBar_window')
-"    return
+"fun! s:Resplit(buf) " Attempt to resplit window if needed. {{{
+"  if winwidth(2) == -1 && exists('w:this_is_SideBar_window')
+"    vsplit
+"    silent! unlet w:this_is_SideBar_window
+"    call s:OnEnter()
+"    exec 'buffer ' . bufnr(a:buf)
+"    bnext
 "  endif
-"  let l:w = 0
-"  while winwidth(l:w) != -1
-"    let l:w = l:w + 1
-"  endwhile
-"  if l:w <= 2 
-"    vnew
-"  endif
-"endfun
+"endfun "}}}
 
 fun! s:Bounce() " Do not allow casual buffer creation in SideBar {{{
   if exists('w:this_is_SideBar_window') && !s:safe 
     wincmd w
+    call s:OnEnter()
   endif
 endfun "}}}
 
@@ -146,16 +158,23 @@ fun! s:Enter() " Switch to SideBar {{{
   let l:w = s:FindSelf()
   if l:w == -1
     call s:Create()
-    call s:Cycle()
+    call s:OnEnter()
+    if bufnr(s:active_buffer) != -1
+      exec "buffer " . s:active_buffer
+    else
+      call s:Cycle()
+    endif
   else
     exec l:w . 'wincmd w'
   endif
 endfun "}}}
 
 fun! s:Create() " Initialize SideBar window{{{
-  vsplit
+  if &winwidth > g:SideBar_min_width
+    let &winwidth = g:SideBar_min_width
+  endif
+  exec g:SideBar_min_width . "vsplit"
   let w:this_is_SideBar_window=1
-  call s:OnEnter()
 endfun "}}}
 
 fun! s:EnterToggle() " see above {{{
@@ -167,8 +186,14 @@ fun! s:EnterToggle() " see above {{{
 endfun "}}}
 
 fun! s:OnEnter() " Ensure SideBar placement and size {{{
+  if winwidth(2) == -1 && exists('w:this_is_SideBar_window')
+    silent! unlet w:this_is_SideBar_window
+    bnext
+    return
+  endif
   if exists('w:this_is_SideBar_window')
-    call s:ExecInside('wincmd H | ' . g:SideBar_max_width . 'wincmd |')
+    wincmd H
+    exec g:SideBar_max_width . 'wincmd |'
   else
     call s:ExecInside('wincmd H | ' . g:SideBar_min_width . 'wincmd |')
   endif
@@ -187,6 +212,7 @@ fun! s:Cycle() " Auxillary cycling function {{{
       return
     elseif bufexists(l:i) && s:IsManaged(l:i)
       exec 'buffer ' . l:i
+      let s:active_buffer = l:i
       return
     endif
   endwhile
@@ -200,12 +226,14 @@ fun! s:ManageBuffer(buf) " Introduce 'buf' to SideBar {{{
   if !s:IsManaged(a:buf) && bufexists(a:buf)
     call setbufvar(a:buf, 'this_is_SideBar_managed_buffer', 1)
   endif
+  let s:active_buffer = a:buf
   call s:ExecInside('buffer ' . a:buf)
 endfun "}}}
 
 fun! s:CycleManaged() " Use command with the same name {{{
   if s:FindSelf() == -1
     call s:Create()
+    wincmd p
   endif
   call s:ExecInside('call s:Cycle()')
 endfun "}}}
@@ -213,18 +241,21 @@ endfun "}}}
 fun! s:Manage(command) " Use command :SideBarAddCmd {{{
   if s:FindSelf() == -1
     call s:Create()
+    wincmd p
   endif
   let s:safe = 1
   call s:ExecInside(a:command)
   call s:ExecInside('setlocal nobuflisted bufhidden=hide')
   call s:ExecInside('call s:ManageBuffer(expand("%:p"))')
+  call s:ExecInside('wincmd H | ' . g:SideBar_min_width . 'wincmd |')
   let s:safe = 0
 endfun "}}}
 
-fun! s:Swallow()
+fun! s:Swallow() " Grab current buffer. {{{
   setlocal nobuflisted bufhidden=hide
   if s:FindSelf() == -1
     call s:Create()
+    wincmd p
   endif
   let s:safe = 1
   call s:ManageBuffer(bufnr('%'))
@@ -243,7 +274,7 @@ fun! s:Swallow()
   else
     enew
   endif
-endfun
+endfun "}}}
 
 
 " Exported commands

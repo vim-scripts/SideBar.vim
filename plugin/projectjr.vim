@@ -1,7 +1,7 @@
 " vim: ts=2 sw=2 et fdm=marker cms=\ \"%s
 " Plugin: ProjectJr --- simplistic rewrite of Aric Blumer's Project plugin
 " Version: 0.2
-" $Id: projectjr.vim,v 1.33 2003/08/13 06:59:16 andrew Exp andrew $
+" $Id: projectjr.vim,v 1.33 2003/08/13 06:59:16 andrew Exp $
 "
 " Author: Andrew Rodionoff <arnost AT mail DOT ru>
 "
